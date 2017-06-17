@@ -24,10 +24,10 @@ UKF::UKF() {
   P_ = MatrixXd(5, 5);
 
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 4;
+  std_a_ = 3;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = .8*M_PI;
+  std_yawdd_ = .4*M_PI;
 
 
   // Laser measurement noise standard deviation position1 in m
@@ -68,7 +68,6 @@ UKF::UKF() {
   weights_ = VectorXd(2 * n_aug_ + 1);
   weights_ << 0, 0, 0, 0, 0, 0, 0, 0,0,0,0,0,0,0,0;
 
-std::cout << weights_ << std::endl;
 
   // Sigma point spreading parameter
 
@@ -100,66 +99,69 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   /*********************************************
   *  Initialize filter
   *********************************************/
-  if (!is_initialized_) {
-    double px, py;
-    if(meas_package.sensor_type_ == MeasurementPackage::RADAR) {
-      //Convert from polar to cartesian
-      double rho = meas_package.raw_measurements_[0];
-      double phi = meas_package.raw_measurements_[1];
-      double rhodot = meas_package.raw_measurements_[2];
 
-      px = rho*cos(phi);
-      py = rho*sin(phi);
+  if ((meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_) ||
+    (meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_)) {
+
+    if (!is_initialized_) {
+      double px, py;
+      if(meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+        //Convert from polar to cartesian
+        double rho = meas_package.raw_measurements_[0];
+        double phi = meas_package.raw_measurements_[1];
+        double rhodot = meas_package.raw_measurements_[2];
+
+        px = rho*cos(phi);
+        py = rho*sin(phi);
+      }
+      else if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
+
+        px = meas_package.raw_measurements_[0];
+        py = meas_package.raw_measurements_[1];
+
+      }
+
+      // Initialize state
+      x_ << px, py, 0, 0, 0;
+
+      // Initialize covariance
+
+      P_ << 1.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1.0;
+
+      time_us_ = meas_package.timestamp_;
+
+      //done initializing 
+      is_initialized_ = true;
+      return;
     }
-    else if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
-
-      px = meas_package.raw_measurements_[0];
-      py = meas_package.raw_measurements_[1];
-
-    }
-
-    // Initialize state
-    x_ << px, py, 0, 0, 0;
-
-    // Initialize covariance
-
-    P_ << 1.0, 0.0, 0.0, 0.0, 0.0,
-          0.0, 1.0, 0.0, 0.0, 0.0,
-          0.0, 0.0, 1.0, 0.0, 0.0,
-          0.0, 0.0, 0.0, 1.0, 0.0,
-          0.0, 0.0, 0.0, 0.0, 1.0;
 
 
+    /*********************************************
+    *    Prediction
+    *********************************************/
+
+    //elapsed time between the current timestamp and previous measurements
+    float dt = (meas_package.timestamp_ - time_us_) / 1000000.0; // dt in seconds
     time_us_ = meas_package.timestamp_;
 
-    //done initializing 
-    is_initialized_ = true;
-    return;
+    Prediction(dt);
+
+    /*********************************************
+    *     Update
+    ********************************************/
+  
+    if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+      //Radar updates
+      UpdateRadar(meas_package);
+    } else if (meas_package.sensor_type_ == MeasurementPackage::LASER){
+      //Laser updates
+      UpdateLidar(meas_package);
+    }
   }
-
-
-  /*********************************************
-  *    Prediction
-  *********************************************/
-
-  //elapsed time between the current timestamp and previous measurements
-  float dt = (meas_package.timestamp_ - time_us_) / 1000000.0; // dt in seconds
-  time_us_ = meas_package.timestamp_;
-
-  Prediction(dt);
-
-  /*********************************************
-   *     Update
-   ********************************************/
- 
-  if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
-    //Radar updates
-    UpdateRadar(meas_package);
-  } else {
-    //Laser updates
-    UpdateLidar(meas_package);
-  }
- 
 }
 
 /**
@@ -228,7 +230,7 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
 	MatrixXd I = MatrixXd::Identity(x_size, x_size);
 	P_ = (I - K * H) * P_;
 
-
+  //NIS_lidar_ = z.transpose() * S.inverse() * z;
 }
 
 /**
@@ -336,6 +338,7 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   x_ = x_ + K * z_diff;
   P_ = P_ - K*S*K.transpose();
 
+  //NIS_radar_ = z_diff.transpose() * S.inverse() * z_diff;
 }
 
 
